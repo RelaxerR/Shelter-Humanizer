@@ -12,6 +12,13 @@ def fit_dialog(window, width=720, height=650):
     window.resizable(True, True)
 
 
+def wheel_units(delta, number=None, *, aqua=False):
+    if delta:
+        # Aqua already reports small trackpad deltas, Windows uses multiples of 120.
+        return -int(delta) if aqua else -int(delta / 120 or (1 if delta > 0 else -1)) * 3
+    return -3 if number == 4 else 3 if number == 5 else 0
+
+
 class ScrollArea(ttk.Frame):
     def __init__(self, parent, *, padding=18):
         super().__init__(parent)
@@ -59,10 +66,12 @@ class ScrollArea(ttk.Frame):
             return
         if self.body.winfo_reqheight() <= self.canvas.winfo_height():
             return
-        direction = -1 if getattr(event, "num", None) == 4 else 1
-        if getattr(event, "delta", 0):
-            direction = -1 if event.delta > 0 else 1
-        self.canvas.yview_scroll(direction * 3, "units")
+        units = wheel_units(
+            getattr(event, "delta", 0),
+            getattr(event, "num", None),
+            aqua=self.tk.call("tk", "windowingsystem") == "aqua",
+        )
+        self.canvas.yview_scroll(units, "units")
         return "break"
 
     def _focus(self, event):

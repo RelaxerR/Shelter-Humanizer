@@ -20,6 +20,7 @@ import zipfile
 from pathlib import Path
 
 from .local_models import PRESETS, DownloadCancelled, model_tag
+from .paths import data_directory
 from .providers import Client, ProviderConfig, ProviderError
 
 RUNTIME_VERSION = "0.35.1"
@@ -264,13 +265,7 @@ class InstallLock:
 
 class ManagedRuntime:
     def __init__(self, directory=None):
-        self.directory = (
-            Path(directory)
-            if directory
-            else Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local" / "share"))
-            / "ShelterHumanizer"
-            / "ai"
-        )
+        self.directory = Path(directory) if directory else data_directory() / "ai"
         self.directory = self.directory.resolve()
         self.runtime_dir = self.directory / f"ollama-{RUNTIME_VERSION}"
         self.executable = self.runtime_dir / "ollama.exe"

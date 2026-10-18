@@ -79,6 +79,16 @@ class GuiTests(unittest.TestCase):
                 raise
             self.skipTest("Tk needs a display; use Xvfb on Linux")
         self.root.withdraw()
+        from shelter_humanizer.preferences import Preferences
+
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        preferences_patch = patch(
+            "shelter_humanizer.gui.Preferences",
+            return_value=Preferences(Path(directory.name) / "settings.json"),
+        )
+        preferences_patch.start()
+        self.addCleanup(preferences_patch.stop)
         self.app = App(self.root, auto_connect=False)
         self.errors = []
         self.app.error = self.errors.append
@@ -165,9 +175,16 @@ class GuiTests(unittest.TestCase):
         self.assertEqual(window.cget("background"), self.app.colors["bg"])
         self.app.apply_theme("light")
         popdown = chooser.tk.call("ttk::combobox::PopdownWindow", str(chooser))
-        self.assertEqual(
-            chooser.tk.call(str(popdown) + ".f.l", "cget", "-foreground"), self.app.colors["ink"]
-        )
+        if chooser.tk.call("tk", "windowingsystem") == "aqua":
+            # Aqua's native menu has no Listbox .f.l to recolor.
+            self.assertEqual(
+                ttk.Style(self.root).lookup("TCombobox", "foreground"), self.app.colors["ink"]
+            )
+        else:
+            self.assertEqual(
+                chooser.tk.call(str(popdown) + ".f.l", "cget", "-foreground"),
+                self.app.colors["ink"],
+            )
         window.destroy()
 
     def test_logo_and_telegram_link(self):
@@ -335,7 +352,9 @@ class GuiTests(unittest.TestCase):
 
         def press(widget, letter, code):
             widget.event_generate(
-                "<KeyPress>", state=4, **({"keycode": code} if windows else {"keysym": letter})
+                "<KeyPress>",
+                state=(8 if self.root.tk.call("tk", "windowingsystem") == "aqua" else 4),
+                **({"keycode": code} if windows else {"keysym": letter}),
             )
             self.root.update()
 
@@ -358,6 +377,24 @@ class GuiTests(unittest.TestCase):
         press(entry, "v", 86)
         self.assertEqual(entry.get(), "Русский текст 👩‍💻")
         window.destroy()
+
+    def test_aqua_context_bindings_and_native_edit_menu_unicode(self):
+        if self.root.tk.call("tk", "windowingsystem") != "aqua":
+            self.skipTest("Aqua-specific native events")
+        widget = self.app.source
+        self.root.deiconify()
+        self.root.update()
+        widget.insert("1.0", "Ёжик 👩‍💻\n" * 1800)
+        widget.event_generate("<<SelectAll>>")
+        widget.event_generate("<<Copy>>")
+        self.assertEqual(read_clipboard(self.root), self.app.get_text(widget))
+        for event in ("<Button-2>", "<Button-3>", "<Control-Button-1>"):
+            with patch.object(widget.shelter_menu, "tk_popup") as popup:
+                widget.event_generate(event, x=10, y=10, rootx=100, rooty=100)
+                self.root.update()
+                popup.assert_called_once_with(100, 100)
+        menu, index = self.menu_action(widget, "Повторить")
+        self.assertEqual(menu.entrycget(index, "accelerator"), "⇧⌘Z")
 
     def test_copy_button_is_beside_result_and_copies_manual_edit(self):
         self.app.output.insert("1.0", "Ручная правка")
@@ -393,6 +430,8 @@ class GuiTests(unittest.TestCase):
         tip.hide()
         self.assertEqual(self.app.get_text(self.app.source), "Сохранить этот текст")
 
+    @patch("shelter_humanizer.gui.IS_MACOS", False)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", True)
     def test_first_launch_offers_qwen_without_installing_or_starting_runtime(self):
         self.app.close()
         with tempfile.TemporaryDirectory() as directory:
@@ -443,6 +482,8 @@ class GuiTests(unittest.TestCase):
                     if window.winfo_exists():
                         window.destroy()
 
+    @patch("shelter_humanizer.gui.IS_MACOS", False)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", True)
     def test_local_setup_restores_saved_deepseek_choice(self):
         with tempfile.TemporaryDirectory() as directory:
             runtime = ManagedRuntime(directory)
@@ -455,6 +496,8 @@ class GuiTests(unittest.TestCase):
             self.app.local_wizard.close()
             runtime.close()
 
+    @patch("shelter_humanizer.gui.IS_MACOS", False)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", True)
     def test_local_setup_does_not_download_on_open_and_applies_installed_model(self):
         runtime = MagicMock()
         runtime.closed = threading.Event()
@@ -484,6 +527,8 @@ class GuiTests(unittest.TestCase):
             runtime.save_model.assert_called_once_with(PRESETS[0].name)
             client.return_value.complete.assert_not_called()
 
+    @patch("shelter_humanizer.gui.IS_MACOS", False)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", True)
     def test_local_setup_download_needs_explicit_acceptance(self):
         self.app.setup_local()
         wizard = self.app.local_wizard
@@ -690,6 +735,8 @@ class GuiTests(unittest.TestCase):
         self.assertTrue(self.app.tabs.winfo_ismapped())
         self.assertIn("замечания", self.app.result_note.get())
 
+    @patch("shelter_humanizer.gui.IS_MACOS", False)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", True)
     def test_saved_model_reconnects_on_start_without_installing(self):
         self.app.close()
         runtime = MagicMock()
@@ -748,6 +795,8 @@ class GuiTests(unittest.TestCase):
         finally:
             other.destroy()
 
+    @patch("shelter_humanizer.gui.IS_MACOS", False)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", True)
     def test_saved_model_starts_again_without_installation(self):
         runtime = MagicMock()
         runtime.closed = threading.Event()
@@ -781,6 +830,8 @@ class GuiTests(unittest.TestCase):
         runtime.start.assert_not_called()
         self.assertEqual(self.app.configs["ollama"].model, "custom-model")
 
+    @patch("shelter_humanizer.gui.IS_MACOS", False)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", True)
     def test_cancelled_installation_stops_owned_runtime_without_applying_connection(self):
         runtime = MagicMock()
         runtime.closed = threading.Event()
@@ -1228,3 +1279,52 @@ class GuiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MacConnectionTests(unittest.TestCase):
+    @patch("shelter_humanizer.gui.IS_MACOS", True)
+    @patch("shelter_humanizer.gui.IS_WINDOWS", False)
+    def test_external_setup_restore_and_close_never_start_or_stop_external_process(self):
+        from shelter_humanizer.preferences import Preferences
+        from shelter_humanizer.providers import ProviderConfig
+
+        with tempfile.TemporaryDirectory() as directory:
+            preferences = Preferences(Path(directory) / "settings.json")
+            preferences.save_connection(ProviderConfig(model="installed:q4"))
+            root = tk.Tk()
+            root.withdraw()
+            app = App(root, preferences=preferences)
+            try:
+                with (
+                    patch.object(app.runtime, "start") as start,
+                    patch.object(app.runtime, "install") as install,
+                ):
+                    self.assertEqual(app.mode.get(), "ollama")
+                    self.assertEqual(app.configs["ollama"].model, "installed:q4")
+                    self.assertFalse(app.managed_connection)
+                    app.setup_local()
+                    root.update()
+                    self.assertIsNone(app.local_wizard)
+                    window = next(
+                        w
+                        for w in root.winfo_children()
+                        if isinstance(w, tk.Toplevel) and w is not app.review_window
+                    )
+                    self.assertEqual(window.title(), "Подключение к ИИ")
+                    chooser = next(
+                        w for w in GuiTests.descendants(window) if isinstance(w, ttk.Combobox)
+                    )
+                    chooser.set("other:q4")
+                    button = next(
+                        w
+                        for w in GuiTests.descendants(window)
+                        if isinstance(w, ttk.Button) and w.cget("text") == "Применить"
+                    )
+                    button.invoke()
+                    self.assertEqual(preferences.load()["external_ollama"]["model"], "other:q4")
+                    start.assert_not_called()
+                    install.assert_not_called()
+                    self.assertIsNone(app.runtime.process)
+            finally:
+                app.close()
+            self.assertIsNone(app.runtime.process)
