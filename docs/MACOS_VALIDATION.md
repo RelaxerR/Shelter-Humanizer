@@ -7,7 +7,7 @@ PyInstaller 6.22.3, Ruff 0.16.9. Исходное дерево было чист
 
 ## Проверено
 
-- 219 unittest-проверок: успешно, 6 Windows-проверок пропущены на Mac.
+- 220 unittest-проверок: успешно, 6 Windows-проверок пропущены на Mac.
   Ruff lint/format и `git diff --check` проходят. Новые тесты проверяют Command/Option/
   Control, русские keysyms, малые дельты Aqua, пути и фильтрацию настроек, внешнюю
   Ollama без запуска managed runtime, события контекстного меню и нативного Edit menu.

@@ -396,6 +396,27 @@ class GuiTests(unittest.TestCase):
         menu, index = self.menu_action(widget, "Повторить")
         self.assertEqual(menu.entrycget(index, "accelerator"), "⇧⌘Z")
 
+    def test_aqua_single_trackpad_tick_scrolls_a_few_pixels(self):
+        from shelter_humanizer.panels import ScrollArea
+
+        if self.root.tk.call("tk", "windowingsystem") != "aqua":
+            self.skipTest("Aqua trackpad deltas")
+        self.root.deiconify()
+        window = tk.Toplevel(self.root)
+        window.geometry("400x300")
+        area = ScrollArea(window)
+        area.pack(fill="both", expand=True)
+        for index in range(100):
+            ttk.Label(area.body, text=f"Строка {index}").pack()
+        self.root.update()
+        before = area.canvas.yview()[0]
+        area.body.event_generate("<MouseWheel>", delta=-1)
+        self.root.update()
+        pixels = (area.canvas.yview()[0] - before) * area.body.winfo_reqheight()
+        self.assertGreater(pixels, 0)
+        self.assertLessEqual(pixels, 6)
+        window.destroy()
+
     def test_copy_button_is_beside_result_and_copies_manual_edit(self):
         self.app.output.insert("1.0", "Ручная правка")
         self.app.copy_button.invoke()

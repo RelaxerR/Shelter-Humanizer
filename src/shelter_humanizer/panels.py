@@ -24,6 +24,10 @@ class ScrollArea(ttk.Frame):
         super().__init__(parent)
         color = ttk.Style(self).lookup("TFrame", "background") or "#f4f2fa"
         self.canvas = tk.Canvas(self, highlightthickness=0, borderwidth=0, background=color)
+        if self.tk.call("tk", "windowingsystem") == "aqua":
+            # Canvas defaults to 1/10 of its viewport per unit, which makes a
+            # one-tick trackpad gesture jump a paragraph. Use logical pixels.
+            self.canvas.configure(yscrollincrement=3)
         scrollbar = ttk.Scrollbar(self, command=self.canvas.yview)
         scrollbar.pack(side="right", fill="y")
         self.canvas.pack(side="left", fill="both", expand=True)
