@@ -44,3 +44,10 @@ PyInstaller bootloader (GPL with the distribution exception). Their complete
 license files accompany the executable in `licenses/`. The application itself
 remains MIT licensed. PyInstaller and Pillow are development tools; Pillow is not
 a runtime dependency and is not included in the application.
+
+macOS arm64 bundles also include Python, Tcl/Tk and the PyInstaller bootloader.
+The ICNS icon is a format conversion of the same supplied IT Shelter shield.
+Runtime license files, including notices of collected Homebrew libraries, are
+included both beside the app and in Contents/Resources/licenses. Ollama and model
+weights are not bundled on macOS. Builds are ad-hoc signed for ARM integrity only,
+not Developer ID signed or notarized.

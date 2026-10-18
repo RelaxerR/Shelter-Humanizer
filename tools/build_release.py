@@ -27,8 +27,10 @@ def main():
     parser.add_argument("--output-dir", type=Path, help="Separate directory for a test build")
     args = parser.parse_args()
     system = platform.system().lower()
-    if system not in ("windows", "linux"):
-        parser.error("Builds currently support Windows and Linux")
+    if system not in ("windows", "linux", "darwin"):
+        parser.error("Build on Windows, Linux or macOS")
+    if system == "darwin" and platform.machine().lower() != "arm64":
+        parser.error("Only Apple Silicon macOS builds have been validated")
     target = (args.output_dir or ROOT / "dist" / system).resolve()
     target.mkdir(parents=True, exist_ok=True)
     work = args.work_dir.resolve()
@@ -61,7 +63,7 @@ def main():
         "PyInstaller",
         "--noconfirm",
         "--clean",
-        "--onefile",
+        "--onedir" if system == "darwin" else "--onefile",
         "--name",
         "Shelter-Humanizer",
         "--paths",
@@ -104,10 +106,26 @@ def main():
             "--icon",
             str(ROOT / "src" / "shelter_humanizer" / "assets" / "it-shelter.ico"),
         ]
+    if system == "darwin":
+        from macos_bundle import make_icon
+
+        icon = make_icon(ROOT / "src/shelter_humanizer/assets/it-shelter-logo.png", work)
+        command[4:4] = [
+            "--windowed",
+            "--target-arch",
+            "arm64",
+            "--icon",
+            str(icon),
+            "--osx-bundle-identifier",
+            "com.relaxerr.shelter-humanizer",
+        ]
     build_environment = dict(os.environ)
     build_environment["PYINSTALLER_CONFIG_DIR"] = str(work / "cache")
     subprocess.run(command, cwd=ROOT, env=build_environment, check=True)
     binary = target / ("Shelter-Humanizer.exe" if system == "windows" else "Shelter-Humanizer")
+    app = target / "Shelter-Humanizer.app"
+    if system == "darwin":
+        binary = app / "Contents/MacOS/Shelter-Humanizer"
     receipt = work / "frozen-selftest.json"
     # All tests use synthetic text and remain offline.
     subprocess.run([str(binary), "--self-test", str(receipt)], cwd=work, check=True, timeout=30)
@@ -128,6 +146,10 @@ def main():
         "PYTHON_LICENSE.txt": Path(sys.base_prefix) / "LICENSE.txt",
         "PYINSTALLER_LICENSE.txt": bootloader_license,
     }
+    if system == "darwin":
+        from macos_bundle import runtime_notices
+
+        runtime.update(runtime_notices(work))
     if system == "windows":
         # python.org Windows installers include the complete Tcl license in LICENSE.txt.
         tcl = Path(sys.base_prefix) / "tcl" / "tcl8.6" / "license.terms"
@@ -143,22 +165,43 @@ def main():
         "x64" if platform.machine().lower() in ("amd64", "x86_64") else platform.machine().lower()
     )
     archive = target / f"Shelter-Humanizer-{__version__}-{system}-{arch}.zip"
-    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
-        bundle.write(binary, binary.name)
-        for name in ("START_HERE.txt", "START_HERE_EN.txt", "LICENSE", "THIRD_PARTY_NOTICES.md"):
-            bundle.write(ROOT / name, name)
-        for name, path in runtime.items():
-            bundle.write(path, "licenses/" + name)
-        for path in sorted((ROOT / "examples").glob("*.txt")):
-            bundle.write(path, "examples/" + path.name)
-        for name in (
-            "ADVANCED_SETTINGS_RU.md",
-            "TROUBLESHOOTING_RU.md",
-            f"RELEASE_NOTES_{__version__}.md",
-        ):
-            bundle.write(ROOT / "docs" / name, "docs/" + name)
-        bundle.writestr("BUILD_INFO.json", metadata.read_bytes())
-        bundle.writestr("SELFTEST.json", receipt.read_bytes())
+    if system == "darwin":
+        from macos_bundle import archive_app, verify_dependencies
+
+        verify_dependencies(app)
+        archive_app(
+            app,
+            archive,
+            ["LICENSE", "THIRD_PARTY_NOTICES.md", "docs/MACOS.md", "docs/MACOS_VALIDATION.md"],
+            runtime,
+            metadata,
+            receipt,
+            ROOT,
+        )
+        subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+        subprocess.run([str(binary), "--self-test", str(receipt)], cwd=work, check=True, timeout=30)
+    else:
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED, compresslevel=9) as bundle:
+            bundle.write(binary, binary.name)
+            for name in (
+                "START_HERE.txt",
+                "START_HERE_EN.txt",
+                "LICENSE",
+                "THIRD_PARTY_NOTICES.md",
+            ):
+                bundle.write(ROOT / name, name)
+            for name, path in runtime.items():
+                bundle.write(path, "licenses/" + name)
+            for path in sorted((ROOT / "examples").glob("*.txt")):
+                bundle.write(path, "examples/" + path.name)
+            for name in (
+                "ADVANCED_SETTINGS_RU.md",
+                "TROUBLESHOOTING_RU.md",
+                f"RELEASE_NOTES_{__version__}.md",
+            ):
+                bundle.write(ROOT / "docs" / name, "docs/" + name)
+            bundle.writestr("BUILD_INFO.json", metadata.read_bytes())
+            bundle.writestr("SELFTEST.json", receipt.read_bytes())
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     (target / "SHA256SUMS.txt").write_text(f"{digest}  {archive.name}\n", encoding="utf-8")
     print(
