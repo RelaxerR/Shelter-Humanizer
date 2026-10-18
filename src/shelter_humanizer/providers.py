@@ -295,7 +295,8 @@ class Client:
             raise ProviderError(self._timeout_message(local), code="idle_timeout") from None
         except urllib.error.URLError:
             raise ProviderError(
-                "Не удалось подключиться. Для Ollama проверьте, что она запущена."
+                "Не удалось подключиться. Для Ollama откройте её приложение или запустите "
+                "ollama serve; проверьте адрес и команду ollama list."
             ) from None
         except (UnicodeError, json.JSONDecodeError):
             raise ProviderError("Некорректный текст или JSON-ответ сервиса.") from None

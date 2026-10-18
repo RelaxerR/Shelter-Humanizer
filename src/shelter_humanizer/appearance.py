@@ -1,5 +1,6 @@
 """One palette per theme; no changes to document or connection state."""
 
+from tkinter import font as tkfont
 from tkinter import ttk
 
 PALETTES = {
@@ -46,22 +47,21 @@ PALETTES = {
 
 def configure_styles(root, theme):
     p = PALETTES[theme]
+    family = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
     style = ttk.Style(root)
     if style.theme_use() != "clam":
         style.theme_use("clam")
-    style.configure(".", background=p["bg"], foreground=p["ink"], font=("Segoe UI", 10))
+    style.configure(".", background=p["bg"], foreground=p["ink"], font=(family, 10))
     style.configure("TFrame", background=p["bg"])
     style.configure("Card.TFrame", background=p["card"])
     style.configure("TLabel", background=p["bg"], foreground=p["ink"])
     style.configure("Muted.TLabel", foreground=p["muted"])
     style.configure("Card.TLabel", background=p["card"], foreground=p["ink"])
-    style.configure("Title.TLabel", font=("Segoe UI", 23, "bold"))
-    style.configure("Heading.TLabel", font=("Segoe UI", 10, "bold"))
-    style.configure("Brand.TLabel", foreground=p["muted"], font=("Segoe UI", 9, "bold"))
-    style.configure("Editor.TLabel", background=p["card"], font=("Segoe UI", 11, "bold"))
-    style.configure(
-        "Hint.TLabel", background=p["card"], foreground=p["muted"], font=("Segoe UI", 9)
-    )
+    style.configure("Title.TLabel", font=(family, 23, "bold"))
+    style.configure("Heading.TLabel", font=(family, 10, "bold"))
+    style.configure("Brand.TLabel", foreground=p["muted"], font=(family, 9, "bold"))
+    style.configure("Editor.TLabel", background=p["card"], font=(family, 11, "bold"))
+    style.configure("Hint.TLabel", background=p["card"], foreground=p["muted"], font=(family, 9))
     style.configure(
         "TButton",
         padding=(12, 8),
@@ -144,7 +144,7 @@ def configure_styles(root, theme):
         )
     style.configure(
         "Treeview",
-        font=("Segoe UI", 9),
+        font=(family, 9),
         rowheight=31,
         background=p["card"],
         fieldbackground=p["card"],
@@ -160,7 +160,7 @@ def configure_styles(root, theme):
     )
     style.configure(
         "Treeview.Heading",
-        font=("Segoe UI", 9, "bold"),
+        font=(family, 9, "bold"),
         padding=(7, 8),
         background=p["heading"],
         foreground=p["muted"],

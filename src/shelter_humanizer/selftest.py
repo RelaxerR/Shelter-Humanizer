@@ -3,19 +3,28 @@
 import hashlib
 import json
 import tempfile
+import threading
+import time
 import tkinter as tk
 from pathlib import Path
+from unittest.mock import patch
 
 from . import __version__
 from .build_info import build_info
 from .diagnostics import snapshot
-from .files import write_text
+from .files import read_text, write_text
 from .gui import SAMPLE, App
 from .local_setup import LocalSetup
 from .managed_runtime import ManagedRuntime
 from .preferences import Preferences
 from .prompts import system_instruction
-from .providers import LOCAL_GENERATION_TIMEOUT, ProviderError
+from .providers import (
+    LOCAL_GENERATION_TIMEOUT,
+    Client,
+    ProviderCancelled,
+    ProviderConfig,
+    ProviderError,
+)
 from .service import offline, rewrite
 
 SMOKE_TEXT = (
@@ -54,6 +63,27 @@ def run(path: str) -> int:
             runtime.save_model("my-editor:q4", allow_custom=True)
             assert ManagedRuntime(directory).selected_model() == "my-editor:q4"
             runtime.close()
+        with tempfile.TemporaryDirectory(prefix="Shelter files ") as directory:
+            source = Path(directory) / "Русский исходник.txt"
+            target = Path(directory) / "Результат.txt"
+            report = Path(directory) / "Отчёт.json"
+            write_text(source, SMOKE_TEXT)
+            with patch(
+                "shelter_humanizer.gui.filedialog.askopenfilename", return_value=str(source)
+            ):
+                app.load()
+            assert app.get_text(app.source) == SMOKE_TEXT
+            app.show_result(offline(SMOKE_TEXT, "clean"))
+            with patch(
+                "shelter_humanizer.gui.filedialog.asksaveasfilename", return_value=str(target)
+            ):
+                assert app.save()
+            with patch(
+                "shelter_humanizer.gui.filedialog.asksaveasfilename", return_value=str(report)
+            ):
+                app.report()
+            assert read_text(target) == app.get_text(app.output)
+            assert json.loads(read_text(report))["original"] == SMOKE_TEXT
         app.set_source(SAMPLE)
         result = offline(SAMPLE)
         app.show_result(result)
@@ -131,6 +161,7 @@ def run(path: str) -> int:
             build=build_info(),
             diagnostics_version=snapshot()["app_version"],
             context_menu_loaded=True,
+            txt_open_save_json_export=True,
             cpu_only_opt_in=not app.configs["ollama"].cpu_only,
         )
         app.close()
@@ -140,5 +171,79 @@ def run(path: str) -> int:
     finally:
         if root is not None:
             root.destroy()
+    write_text(Path(path), json.dumps(receipt, ensure_ascii=False, indent=2) + "\n")
+    return 0 if receipt["ok"] else 1
+
+
+def run_ollama(model: str, path: str) -> int:
+    """Explicit online acceptance using an already installed external model only."""
+    receipt = {"ok": False, "model": model, "network_used": True}
+    app = None
+    try:
+        with tempfile.TemporaryDirectory() as directory:
+            root = tk.Tk()
+            root.withdraw()
+            preferences = Preferences(Path(directory) / "settings.json")
+            app = App(root, auto_connect=False, preferences=preferences)
+            config = ProviderConfig(model=model, timeout=180, inspect_model=True)
+            assert model in Client(config).models()
+            preferences.save_connection(config)
+            app.configs["ollama"] = config
+            app.mode.set("ollama")
+            app.second_pass.set(False)
+            app.set_source("Сегодня хорошая погода. Мы гуляем в парке.")
+            errors = []
+            app.error = errors.append
+            app.run("edit")
+            deadline = time.monotonic() + 180
+            while app.busy and time.monotonic() < deadline:
+                root.update()
+                time.sleep(0.02)
+            assert not app.busy and not errors, errors
+            assert app.result is not None and app.get_text(app.output).strip()
+            receipt["generated_text"] = app.get_text(app.output)
+            receipt["stats"] = app.last_diagnostics
+            previous = app.get_text(app.output)
+            app.run("edit")
+            app.cancel.set()
+            deadline = time.monotonic() + 5
+            while app.busy and time.monotonic() < deadline:
+                root.update()
+                time.sleep(0.02)
+            assert not app.busy and app.get_text(app.output) == previous
+            assert app.runtime.process is None
+            app.close()
+            app = None
+            root = tk.Tk()
+            root.withdraw()
+            app = App(root, preferences=preferences)
+            assert app.configs["ollama"].model == model and not app.managed_connection
+            app.close()
+            app = None
+            assert model in Client(config).models()
+            cancel = threading.Event()
+            client = Client(config, cancel=cancel)
+            timer = threading.Timer(0.25, cancel.set)
+            timer.start()
+            try:
+                # A long request makes mid-stream cancellation observable even on a warm model.
+                client.complete([{"role": "user", "content": "Перечисли тысячу названий цветов."}])
+                raise AssertionError("Request completed before cancellation")
+            except ProviderCancelled:
+                receipt["transport_cancelled"] = True
+            finally:
+                timer.cancel()
+            receipt.update(
+                ok=True,
+                gui_generation=True,
+                previous_result_preserved=True,
+                selection_restored=True,
+                external_service_survived_close=True,
+            )
+    except Exception as exc:
+        receipt["error"] = str(exc)
+    finally:
+        if app is not None and not app.closed:
+            app.close()
     write_text(Path(path), json.dumps(receipt, ensure_ascii=False, indent=2) + "\n")
     return 0 if receipt["ok"] else 1

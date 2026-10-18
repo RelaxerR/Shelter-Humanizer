@@ -1,5 +1,7 @@
 # Shelter Humanizer
 
+**macOS Apple Silicon:** [установка, внешний Ollama и самостоятельная .app](docs/MACOS.md). Проверенная конфигурация и ограничения — [приёмка](docs/MACOS_VALIDATION.md).
+
 **ИИ-редактура текста и очистка скрытых символов — в простом Windows-приложении.**
 
 [English](README_EN.md) · [Скачать для Windows](https://github.com/IT-Shelter-Labs/Shelter-Humanizer/releases/latest) · [Инструкция](docs/QUICKSTART_RU.md) · [Telegram IT Shelter](https://t.me/+txLM4MYbMh9lZDli)
