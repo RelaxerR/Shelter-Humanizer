@@ -8,6 +8,10 @@ if not getattr(sys, "frozen", False):
 
 
 def main():
+    if len(sys.argv) == 4 and sys.argv[1] == "--ollama-self-test":
+        from shelter_humanizer.selftest import run_ollama
+
+        return run_ollama(sys.argv[2], sys.argv[3])
     if len(sys.argv) == 3 and sys.argv[1] == "--self-test":
         from shelter_humanizer.selftest import run
 
@@ -16,8 +20,18 @@ def main():
         from shelter_humanizer.cli import main as cli_main
 
         return cli_main()
-    from shelter_humanizer.gui import launch
-
+    try:
+        from shelter_humanizer.gui import launch
+    except ModuleNotFoundError as exc:
+        if exc.name not in ("tkinter", "_tkinter"):
+            raise
+        print(
+            "Tkinter is missing. On macOS install matching Python/Tk: "
+            "brew install python@3.14 python-tk@3.14; recreate .venv. "
+            "See docs/MACOS.md. CLI analyze/clean remain available.",
+            file=sys.stderr,
+        )
+        return 2
     launch()
     return 0
 

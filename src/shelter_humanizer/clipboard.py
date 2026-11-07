@@ -2,6 +2,8 @@
 
 import base64
 import ctypes
+import os
+import subprocess
 import sys
 import time
 import tkinter as tk
@@ -47,6 +49,20 @@ def open_windows(widget, user):
 
 
 def write(widget, text):
+    if sys.platform == "darwin":
+        # Native pasteboard avoids Tk's long-text UTF-8 conversion corruption.
+        try:
+            subprocess.run(
+                ["/usr/bin/pbcopy"],
+                input=text.encode("utf-8"),
+                env={**os.environ, "LC_CTYPE": "en_US.UTF-8"},
+                check=True,
+                timeout=3,
+                capture_output=True,
+            )
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            raise tk.TclError("Не удалось скопировать текст в буфер macOS.") from None
+        return
     if sys.platform != "win32":
         widget.clipboard_clear()
         try:
@@ -90,6 +106,20 @@ def write(widget, text):
 
 
 def read(widget):
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["/usr/bin/pbpaste"],
+                capture_output=True,
+                check=True,
+                timeout=3,
+                env={**os.environ, "LC_CTYPE": "en_US.UTF-8"},
+            )
+            if len(result.stdout) > 2 * 1024 * 1024:
+                raise tk.TclError("Текст в буфере слишком большой.")
+            return result.stdout.decode("utf-8")
+        except (OSError, subprocess.SubprocessError, UnicodeError):
+            raise tk.TclError("Не удалось прочитать текст из буфера macOS.") from None
     if sys.platform != "win32":
         try:
             encoded = widget.clipboard_get(type=_CUSTOM_UTF8_TYPE)

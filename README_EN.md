@@ -1,5 +1,7 @@
 # Shelter Humanizer
 
+**macOS Apple Silicon:** [source setup, external Ollama and standalone .app](docs/MACOS.md) (Russian). See [validation and limitations](docs/MACOS_VALIDATION.md); Intel Macs are not claimed.
+
 **AI text editing and hidden-character cleanup in a simple Windows desktop app.**
 
 [Русский](README.md) · [Download for Windows](https://github.com/IT-Shelter-Labs/Shelter-Humanizer/releases/latest) · [Russian quick start](docs/QUICKSTART_RU.md) · [IT Shelter on Telegram](https://t.me/+txLM4MYbMh9lZDli)

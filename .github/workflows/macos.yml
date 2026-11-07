@@ -1,0 +1,44 @@
+name: macOS Apple Silicon
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-26
+    env:
+      PYTHONUTF8: '1'
+      SHELTER_REQUIRE_GUI_TESTS: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - run: brew install python@3.14 python-tk@3.14
+      - run: |
+          python3.14 -m venv .venv
+          .venv/bin/python -m pip install -e . -r requirements-dev.txt
+      - name: Platform checks without creating a GUI
+        run: |
+          .venv/bin/python -m ruff check .
+          .venv/bin/python -m ruff format --check .
+          .venv/bin/python -m unittest discover -s tests -p test_platform.py -v
+          .venv/bin/python launcher.py analyze examples/post_before.txt
+      - name: Real Tk tests in runner desktop session
+        run: .venv/bin/python -m unittest discover -s tests -v
+      - name: Build and verify standalone arm64 app
+        run: |
+          test "$(uname -m)" = arm64
+          .venv/bin/python tools/build_release.py
+          cd dist/darwin
+          shasum -a 256 -c SHA256SUMS.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shelter-humanizer-macos-arm64
+          path: |
+            dist/darwin/*.zip
+            dist/darwin/SHA256SUMS.txt
+          if-no-files-found: error

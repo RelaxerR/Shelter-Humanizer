@@ -1,0 +1,33 @@
+name: macOS draft release
+
+on:
+  push:
+    tags: ['macos-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-26
+    env:
+      SHELTER_REQUIRE_GUI_TESTS: '1'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - run: brew install python@3.14 python-tk@3.14
+      - run: |
+          python3.14 -m venv .venv
+          .venv/bin/python -m pip install -e . -r requirements-dev.txt
+          .venv/bin/python -m ruff check .
+          .venv/bin/python -m ruff format --check .
+          .venv/bin/python -m unittest discover -s tests -v
+          .venv/bin/python tools/build_release.py
+      - name: Create a reviewable draft in this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft --prerelease \
+            --title "Shelter Humanizer $GITHUB_REF_NAME · macOS arm64" \
+            --notes-file docs/MACOS.md dist/darwin/*.zip dist/darwin/SHA256SUMS.txt

@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import json
 import queue
+import sys
 import threading
 import tkinter as tk
 import urllib.parse
@@ -12,6 +13,7 @@ import webbrowser
 from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from tkinter import font as tkfont
 
 from . import __version__
 from .appearance import PALETTES, configure_styles
@@ -40,6 +42,9 @@ from .ui_helpers import (
 )
 from .unicode_check import CleanOptions, clean_unicode
 
+IS_MACOS = sys.platform == "darwin"
+IS_WINDOWS = sys.platform == "win32"
+
 EDIT_CHOICES = {"edit": "Небольшие правки", "rephrase": "Переписать формулировки"}
 
 TELEGRAM_URL = "https://t.me/+txLM4MYbMh9lZDli"
@@ -57,6 +62,7 @@ SAMPLE = (
 class App:
     def __init__(self, root: tk.Tk, *, auto_connect=True, preferences=None):
         self.root = root
+        self.font_family = tkfont.nametofont("TkDefaultFont", root=root).actual("family")
         root.title(f"Shelter Humanizer · {__version__}")
         available_width = max(760, root.winfo_screenwidth() - 50)
         available_height = max(480, root.winfo_screenheight() - 100)
@@ -65,6 +71,8 @@ class App:
         root.geometry(f"{width}x{height}")
         root.minsize(min(960, available_width), min(620, available_height))
         root.protocol("WM_DELETE_WINDOW", self.request_close)
+        if IS_MACOS:
+            root.createcommand("tk::mac::Quit", self.request_close)
         self.closed = False
         self.events = queue.Queue()
         self.model_requests = {}
@@ -91,6 +99,9 @@ class App:
             "ollama": ProviderConfig(timeout=180, inspect_model=True),
             "api": ProviderConfig("api", "https://openrouter.ai/api/v1"),
         }
+        external = saved.get("external_ollama")
+        if external:
+            self.configs["ollama"] = ProviderConfig(**external, timeout=180, inspect_model=True)
         self.voice = ""
         self.terms = ()
         self.last_chat_prompt = None
@@ -115,7 +126,10 @@ class App:
         attach_help(root, lambda: self.colors)
         self.source.bind("<<Modified>>", self._source_changed)
         self.poll_id = root.after(80, self._poll)
-        if auto_connect and self.runtime.selected_model():
+        if external:
+            self.mode.set("ollama")
+            self._mode_changed()
+        elif auto_connect and IS_WINDOWS and self.runtime.selected_model():
             self.mode.set("ollama")
             root.after_idle(self.select_mode)
 
@@ -140,18 +154,19 @@ class App:
             elif isinstance(widget, ttk.Combobox):
                 # Update a popdown that has already been opened in the previous theme.
                 popdown = widget.tk.call("ttk::combobox::PopdownWindow", str(widget))
-                widget.tk.call(
-                    str(popdown) + ".f.l",
-                    "configure",
-                    "-background",
-                    p["card"],
-                    "-foreground",
-                    p["ink"],
-                    "-selectbackground",
-                    p["selection"],
-                    "-selectforeground",
-                    p["selected_ink"],
-                )
+                if widget.tk.call("winfo", "exists", str(popdown) + ".f.l"):
+                    widget.tk.call(
+                        str(popdown) + ".f.l",
+                        "configure",
+                        "-background",
+                        p["card"],
+                        "-foreground",
+                        p["ink"],
+                        "-selectbackground",
+                        p["selection"],
+                        "-selectforeground",
+                        p["selected_ink"],
+                    )
             for child in widget.winfo_children():
                 recolor(child)
 
@@ -355,7 +370,7 @@ class App:
             undo=True,
             height=height,
             width=20,
-            font=("Segoe UI", 11),
+            font=(self.font_family, 11),
             relief="flat",
             padx=10,
             pady=10,
@@ -505,7 +520,11 @@ class App:
             (
                 "ollama",
                 "ИИ на компьютере",
-                "Переписывание локальной моделью. Установка через кнопку ниже.",
+                (
+                    "Подключите отдельно установленную Ollama."
+                    if IS_MACOS
+                    else "Переписывание локальной моделью. Установка через кнопку ниже."
+                ),
             ),
             (
                 "api",
@@ -529,7 +548,9 @@ class App:
             action()
 
         ttk.Button(
-            buttons, text="Установить локальный ИИ", command=lambda: open_next(self.setup_local)
+            buttons,
+            text=("Подключить Ollama" if IS_MACOS else "Установить локальный ИИ"),
+            command=lambda: open_next(self.setup_local),
         ).pack(side="left")
         self.connection_button = ttk.Button(
             buttons, text="Настроить подключение", command=lambda: open_next(self.settings)
@@ -749,7 +770,7 @@ class App:
         if self.closed:
             return
         self._mode_changed()
-        model = self.runtime.selected_model()
+        model = self.runtime.selected_model() if IS_WINDOWS else ""
         if self.mode.get() != "ollama" or not model or self.busy:
             return
         if not self.managed_connection and self.configs["ollama"].model:
@@ -1054,6 +1075,9 @@ class App:
                             chooser.configure(values=models)
                             note.set(
                                 f"Доступно моделей: {len(models)}. Выберите из списка или впишите имя."
+                                if models
+                                else "Моделей нет. Проверьте ollama list; выберите модель "
+                                "на ollama.com/search, проверьте размер и выполните ollama pull ИМЯ."
                             )
                             if len(models) == 1:
                                 chooser.set(models[0])
@@ -1457,8 +1481,14 @@ class App:
             anchor="w"
         )
         note = (
-            "Ollama: сначала установите и загрузите модель с ollama.com. "
-            "Адрес по умолчанию: http://localhost:11434. Имя модели — из ollama list."
+            (
+                "Ollama: установите приложение с https://ollama.com/download/mac и запустите его. "
+                if IS_MACOS
+                else "Ollama: установите её с https://ollama.com/download и запустите сервис. "
+            )
+            + "Проверьте: ollama list. Если список пуст, выберите модель на ollama.com/search, "
+            "проверьте размер и выполните ollama pull ИМЯ. "
+            "Адрес по умолчанию: http://localhost:11434. Здесь загрузка моделей не запускается."
             if kind == "ollama"
             else "OpenRouter: https://openrouter.ai/api/v1. Подойдёт также другой OpenAI-compatible сервис. "
             "Не добавляйте /chat/completions. Сервис получает текст и образец стиля."
@@ -1466,7 +1496,12 @@ class App:
         ttk.Label(frame, text=note, wraplength=575, style="Muted.TLabel").pack(fill="x", pady=12)
         ttk.Label(
             frame,
-            text="Настройки действуют в текущем запуске. Ключ не сохраняется на диск.",
+            text=(
+                "Адрес и модель Ollama сохраняются для следующего запуска. Внешний сервис "
+                "продолжает работать после закрытия приложения."
+                if kind == "ollama"
+                else "Настройки действуют в текущем запуске. Ключ не сохраняется на диск."
+            ),
             wraplength=575,
             style="Muted.TLabel",
         ).pack(anchor="w")
@@ -1519,6 +1554,9 @@ class App:
             try:
                 candidate.validate()
                 candidate = replace(candidate, url=candidate.base_url())
+                managed = self.managed_connection and candidate.url == config.base_url()
+                if kind == "ollama":
+                    self.preferences.save_connection(None if managed else candidate)
                 self.configs[kind] = candidate
                 if kind == "ollama":
                     self.managed_connection = (
@@ -1526,8 +1564,12 @@ class App:
                     )
                 self._mode_changed()
                 window.destroy()
-                self.status.set("Подключение настроено для текущего запуска.")
-            except ValueError as exc:
+                self.status.set(
+                    "Подключение Ollama сохранено."
+                    if kind == "ollama"
+                    else "Подключение настроено для текущего запуска."
+                )
+            except (ValueError, OSError) as exc:
                 messagebox.showerror("Проверьте настройки", str(exc), parent=window)
 
         ttk.Button(footer, text="Применить", style="Accent.TButton", command=save).pack(
@@ -1536,10 +1578,15 @@ class App:
         attach_help(window, lambda: self.colors)
 
     def setup_local(self):
-        hide_tooltips(self.root)
         if self.busy:
             self.status.set("Дождитесь завершения текущей обработки перед настройкой ИИ.")
             return
+        if IS_MACOS:
+            self.mode.set("ollama")
+            self._mode_changed()
+            self.settings()
+            return
+        hide_tooltips(self.root)
         if self.local_wizard is not None and not self.local_wizard.closed:
             self.local_wizard.window.lift()
             return
@@ -1548,6 +1595,7 @@ class App:
             self.configs["ollama"] = ProviderConfig(
                 url=url, model=model, timeout=180, inspect_model=True
             )
+            self.preferences.save_connection(None)
             self.managed_connection = True
             self.mode.set("ollama")
             self._mode_changed()

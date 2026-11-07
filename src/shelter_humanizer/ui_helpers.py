@@ -1,6 +1,7 @@
 """Layout-independent editing and small contextual help for our own widgets."""
 
 import tkinter as tk
+from tkinter import font as tkfont
 from tkinter import ttk
 
 from .clipboard import read as read_clipboard
@@ -60,9 +61,11 @@ def edit_action(widget, action):
         pass
 
 
-def shortcut_action(keycode, keysym, state, windows=False):
+def shortcut_action(keycode, keysym, state, windows=False, aqua=False):
     # On Windows bit 8 is NumLock, not Alt (X11 uses it for Alt).
-    if not state & 4 or state & (0x20000 if windows else 8):
+    modifier = 8 if aqua else 4  # Aqua Command is Mod1; Option is Mod2.
+    forbidden = (4 | 16) if aqua else (0x20000 if windows else 8)
+    if not state & modifier or state & forbidden:
         return None
     letters = {65: "a", 66: "b", 67: "c", 86: "v", 88: "x", 89: "y", 90: "z"}
     aliases = {
@@ -83,6 +86,8 @@ def shortcut_action(keycode, keysym, state, windows=False):
     }
     key = letters.get(keycode) if windows else None
     key = key or aliases.get(keysym.lower(), keysym.lower())
+    if aqua and key == "b":
+        return None
     actions = {
         "a": "all",
         "b": "paste",
@@ -96,7 +101,8 @@ def shortcut_action(keycode, keysym, state, windows=False):
 
 
 def install_shortcuts(root):
-    windows = root.tk.call("tk", "windowingsystem") == "win32"
+    system = root.tk.call("tk", "windowingsystem")
+    windows, aqua = system == "win32", system == "aqua"
 
     def handle(event):
         state = event.state
@@ -109,14 +115,33 @@ def install_shortcuts(root):
                 state |= 4
             if ctypes.windll.user32.GetKeyState(0x12) & 0x8000:
                 return None
-        action = shortcut_action(event.keycode, event.keysym, state, windows)
+        action = shortcut_action(event.keycode, event.keysym, state, windows, aqua)
         if action is None:
             return None
         widget = event.widget
+        if not isinstance(widget, (tk.Text, tk.Entry, ttk.Entry, ttk.Combobox)):
+            return None
         edit_action(widget, action)
         return "break"
 
     root.bind_class("ShelterEditing", "<KeyPress>", handle)
+    if aqua:
+        # The native Edit menu emits virtual events instead of physical keys.
+        # Consume them before Tk's clipboard code so long Unicode stays intact.
+        for virtual, action in (
+            ("Copy", "copy"),
+            ("Cut", "cut"),
+            ("Paste", "paste"),
+            ("SelectAll", "all"),
+            ("Undo", "undo"),
+            ("Redo", "redo"),
+        ):
+
+            def native_edit(event, action=action):
+                edit_action(event.widget, action)
+                return "break"
+
+            root.bind_class("ShelterEditing", f"<<{virtual}>>", native_edit)
 
 
 def bind_editing(widget):
@@ -133,16 +158,18 @@ def bind_editing(widget):
             label=label, accelerator=accelerator, command=lambda: edit_action(widget, action)
         )
 
+    aqua = widget.tk.call("tk", "windowingsystem") == "aqua"
+    modifier = "⌘" if aqua else "Ctrl+"
     if isinstance(widget, tk.Text):
-        add("Отменить", "undo", "Ctrl+Z")
-        add("Повторить", "redo", "Ctrl+Y")
+        add("Отменить", "undo", modifier + "Z")
+        add("Повторить", "redo", "⇧⌘Z" if aqua else "Ctrl+Y")
         menu.add_separator()
-    add("Вырезать", "cut", "Ctrl+X")
-    add("Копировать", "copy", "Ctrl+C")
-    add("Вставить", "paste", "Ctrl+V")
+    add("Вырезать", "cut", modifier + "X")
+    add("Копировать", "copy", modifier + "C")
+    add("Вставить", "paste", modifier + "V")
     add("Удалить выделенное", "delete")
     menu.add_separator()
-    add("Выделить всё", "all", "Ctrl+A")
+    add("Выделить всё", "all", modifier + "A")
 
     def update_menu():
         is_text = isinstance(widget, tk.Text)
@@ -163,7 +190,7 @@ def bind_editing(widget):
         hide_tooltips(widget.winfo_toplevel())
         widget.focus_set()
         update_menu()
-        pointer = getattr(event, "num", None) == 3
+        pointer = getattr(event, "num", None) in (1, 2, 3)
         x = event.x_root if pointer else widget.winfo_rootx() + 20
         y = event.y_root if pointer else widget.winfo_rooty() + 20
         previous = widget.grab_current()
@@ -183,7 +210,10 @@ def bind_editing(widget):
 
     # Refresh before native posting and before programmatic accessibility activation.
     menu.configure(postcommand=update_menu)
-    for sequence in ("<Button-3>", "<Shift-F10>", "<KeyPress-Menu>"):
+    sequences = ["<Button-3>", "<Shift-F10>", "<KeyPress-Menu>"]
+    if aqua:
+        sequences += ["<Button-2>", "<Control-Button-1>"]
+    for sequence in sequences:
         widget.bind(sequence, popup, add="+")
 
 
@@ -224,7 +254,7 @@ class Tooltip:
             justify="left",
             background=p["card"],
             foreground=p["ink"],
-            font=("Segoe UI", 10),
+            font=(tkfont.nametofont("TkDefaultFont", root=self.owner).actual("family"), 10),
             padx=12,
             pady=10,
         )
@@ -277,7 +307,7 @@ HELP = {
     "Использовать модель": "Выбирает установленную модель в основном приложении и включает режим «ИИ на компьютере». Никакой текст пока не отправляется.",
     "Копировать": "Копирует весь текст результата, включая ваши ручные изменения. Выделять его не нужно.",
     "Без ИИ": "Работает без ИИ: ищет подозрительные символы и делает только небольшие правки по правилам. Хороший текст может остаться без изменений.",
-    "ИИ на компьютере": "Перефразирование локальной моделью через Ollama. Кнопка «Установить локальный ИИ» поможет загрузить модель без терминала.",
+    "ИИ на компьютере": "Перефразирование локальной моделью через Ollama. Подключение настраивается в окне «Выбрать ИИ».",
     "ИИ-сервис по ключу": "Отправляет текст выбранному ИИ-сервису. Нужны API-ключ и имя модели; возможна оплата по тарифам сервиса.",
     "Тип текста": "Выберите жанр: обычный, деловой, научный или пост. Научный режим сохраняет допустимые формальные обороты.",
     "Что изменить": "Небольшие правки сохраняют формулировки. Переписывание меняет предложения с сохранением содержания. Офлайн-правила от этого не меняются.",
@@ -291,13 +321,13 @@ HELP = {
     "Очистить символы": "Убирает подозрительные управляющие и невидимые знаки вне защищённых фрагментов. Кириллица, кавычки, тире и корректные emoji сохраняются.",
     "Обработать в ИИ-чате…": "Копирует готовое задание с вашим текстом. Отправьте его в привычный ИИ-чат, вставьте ответ справа и проверьте правки.",
     "Копировать задание с текстом": "Копирует редакторское задание и исходник. Вставьте это сообщение в свой ИИ-чат и отправьте самостоятельно.",
-    "Выбрать ИИ": "Выберите обработку без ИИ, локальную модель или сервис по API-ключу. Для локального ИИ есть автоматическая установка.",
+    "Выбрать ИИ": "Выберите обработку без ИИ, локальную модель Ollama или сервис по API-ключу.",
     "Настройки текста": "Необязательные параметры: тип правок, ваш стиль, важные слова и дополнительные замены символов.",
     "Проверки и изменения…": "Открывает находки символов, замечания к стилю, сравнение текстов и проверку смысловых изменений.",
     "Вставить ответ в результат": "Сначала скопируйте ответ из ИИ-чата. Приложение вставит его справа и сравнит с исходником.",
     "Открыть ChatGPT ↗": "Открывает сайт в браузере. Ваш текст не отправляется автоматически; задание нужно вставить и отправить самостоятельно.",
     "Копировать текст": "Копирует весь текст из правого поля, включая ваши ручные изменения. Выделять его не нужно.",
-    "Настроить подключение": "Укажите адрес сервера, модель и, для облачного API, ключ. Ключ и настройки не сохраняются на диск.",
+    "Настроить подключение": "Укажите адрес сервера, модель и, для облачного API, ключ. Адрес и модель внешней Ollama сохраняются; API-ключ остаётся только в памяти.",
     "Установить локальный ИИ": "Выберите модель и подтвердите — приложение само скачает и включит ИИ. Без команд и отдельного установщика. При закрытии ИИ выключится, а файлы останутся для следующего запуска.",
     "Светлая": "Светлое оформление. При переключении исходник и результат сохраняются.",
     "Тёмная": "Тёмное оформление. При переключении исходник и результат сохраняются.",
